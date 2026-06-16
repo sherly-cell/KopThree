@@ -1,8 +1,8 @@
 export default function manifest() {
   return {
-    name: 'Dejoa Coffee & Kitchen',
-    short_name: 'Dejoa Coffee',
-    description: 'Aplikasi Pemesanan E-Commerce Dejoa Coffee',
+    name: 'KopThree & Kitchen',
+    short_name: 'KopThree',
+    description: 'Aplikasi Pemesanan E-Commerce KopThree',
     start_url: '/',
     display: 'standalone',
     background_color: '#0a0a0a', // Warna splash screen pas aplikasi dibuka
