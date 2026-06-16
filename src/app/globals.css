@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+  --color-brand-gold: #c7a17a;
+  --color-brand-gold-dark: #a67c52;
+  --color-brand-gold-light: #e6c5a3;
+  --color-brand-bronze: #5c3d2e;
+}
+
+body {
+  font-family: var(--font-sans);
+}
