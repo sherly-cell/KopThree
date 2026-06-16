@@ -523,11 +523,13 @@ export default function Home() {
               <div className="absolute -bottom-3 -right-3 w-12 h-12 border-b border-r border-amber-500/60"></div>
               <div className="relative w-full h-full overflow-hidden rounded-md group">
                 <Image
-                  src="https://images.unsplash.com/photo-151097252790b-a48177348574?q=80&w=600&auto=format&fit=crop"
-                  alt="Espresso shot Kopthree"
-                  fill
-                  className="object-cover group-hover:scale-105 transition-transform duration-700"
-                />
+  src="https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?q=80&w=600&auto=format&fit=crop" // 👈 Menggunakan ID gambar yang terbukti aktif di console lu
+  alt="Espresso shot Kopthree"
+  fill
+  sizes="(max-width: 1024px) 100vw, 320px" // 👈 Menghilangkan peringatan kuning di console
+  className="object-cover group-hover:scale-105 transition-transform duration-700"
+  priority // 👈 Ditambahkan karena ini gambar utama (Above the fold) biar loading-nya instan
+/>
                 <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/20 to-transparent"></div>
                 <div className="absolute bottom-4 left-4 right-4">
                   <span className="text-[10px] text-amber-500 tracking-widest uppercase font-semibold">Flagship Roast</span>
