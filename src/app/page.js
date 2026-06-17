@@ -193,15 +193,27 @@ export default function Home() {
     );
   };
   // Fungsi mengirim pesanan ke Midtrans dan membuka pop-up pembayaran
+  // Fungsi mengirim pesanan ke Midtrans dan membuka pop-up pembayaran
   const handleCheckout = async () => {
+    // 🟢 1. PROTEKSI: Cek apakah user sudah masuk akun atau belum
+    if (!user) {
+      alert("Eits! Lu wajib masuk ruko Kopthree dulu sebelum checkout pesanan, Bro.");
+      
+      setAuthMode("login");       // Set modal ke mode login
+      setIsAuthModalOpen(true);   // Buka pop-up login secara otomatis
+      setIsCartOpen(false);       // Tutup modal keranjang biar gak tumpang tindih
+      return;                     // Hentikan proses, gak boleh lanjut ke Midtrans
+    }
+
+    // 2. Jika lolos (sudah login), jalankan kode bawaan lu di bawah ini
     try {
-      const userEmail = user ? user.email : null;
+      const userEmail = user.email; // Sekarang email dijamin aman, gak bakal null
 
       // Ambil token dari API Route dengan menyertakan opsi & notes
       const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cart, userEmail, orderType, orderNotes }), // <-- Kita kirim di sini, Bro
+        body: JSON.stringify({ cart, userEmail, orderType, orderNotes }),
       });
 
       const data = await response.json();
@@ -209,9 +221,9 @@ export default function Home() {
       if (data.token) {
         window.snap.pay(data.token, {
           onSuccess: function (result) {
-            alert("Pembayaran Sukses! Kopi pilihanmu segera diseduh oleh barista Dejoa!");
+            alert("Pembayaran Sukses! Kopi pilihanmu segera diseduh oleh barista Kopthree!");
             setCart([]); 
-            setOrderNotes(""); // Reset catatan setelah sukses
+            setOrderNotes(""); 
             setIsCartOpen(false); 
           },
           onPending: function (result) {
@@ -229,7 +241,7 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Gagal Checkout:", error);
-      alert("Kasir Dejoa sedang sibuk, terjadi gangguan sistem.");
+      alert("Kasir Kopthree sedang sibuk, terjadi gangguan sistem.");
     }
   };
 
