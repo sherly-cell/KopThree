@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "../../config/firebase"; // 👈 Sesuaikan jalur ke file config firebase lu
+// 🟢 PERBAIKI BARIS INI: Tambah ../ jadi 3 kali biar beneran sampe ke folder src
+import { db } from "../../../config/firebase"; 
 import { doc, updateDoc } from "firebase/firestore";
 
 export async function POST(request) {
+  // ... sisa kode di bawahnya biarin tetep sama ya, Bro ...
   try {
     const body = await request.json();
     
