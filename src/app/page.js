@@ -144,76 +144,149 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [registerName, setRegisterName] = useState("");
+  const [phone, setPhone] = useState("");
+  
   // --- STATE UNTUK SHOPPING CART ---
   const [cart, setCart] = useState([]); // Menyimpan daftar kopi yang dibeli
   const [isCartOpen, setIsCartOpen] = useState(false); // Mengatur buka/tutup modal keranjang
+  
   // State untuk Opsi Transaksi & Catatan Tambahan
   const [orderType, setOrderType] = useState("dine-in"); // dine-in, takeaway, delivery
   const [orderNotes, setOrderNotes] = useState("");
+  
+  const [tableNumber, setTableNumber] = useState("");
+  const [pickupTime, setPickupTime] = useState("");
 
+  // 🟢 SELIPKAN 2 STATE BARU INI, BRO:
+  const [orderHistory, setOrderHistory] = useState([]); // Menampung list riwayat pesanan
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false); // Mengatur buka/tutup modal riwayat
+
+  // 🟢 RADAR REALTIME: Pantau perubahan status pesanan langsung dari Firestore
+  useEffect(() => {
+    if (!user || !user.email) {
+      setOrderHistory([]);
+      return;
+    }
+
+    let unsubscribe;
+    const listenToUserOrders = async () => {
+      const { collection, query, where, onSnapshot } = await import("firebase/firestore");
+      
+      // Cari dokumen di koleksi "orders" yang emailnya cocok dengan user yang sedang login
+      const q = query(collection(db, "orders"), where("userEmail", "==", user.email));
+      
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const ordersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Urutkan dari pesanan yang paling baru dibuat
+        setOrderHistory(ordersData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+      });
+    };
+
+    listenToUserOrders();
+    return () => unsubscribe && unsubscribe(); // Putus koneksi radar pas user logout
+  }, [user]);
+
+  // 🟢 2. GESER POSISI HITUNGAN INI KE ATAS (Biar terbaca oleh grandTotal di bawahnya)
   // Hitung jumlah total item di keranjang secara otomatis
   const cartCount = useMemo(() => {
     return cart.reduce((total, item) => total + item.quantity, 0);
   }, [cart]);
 
-  // Hitung total harga belanjaan secara otomatis
+  // 🟢 GANTI RUMUS LAMA DENGAN INI:
+  // Hitung total harga belanjaan secara otomatis termasuk add-ons berbayar
   const cartTotal = useMemo(() => {
-    return cart.reduce((total, item) => total + (item.price * item.quantity), 0);
+    return cart.reduce((total, item) => {
+      const addOnsTotal = (item.selectedAddOns || []).reduce((sum, addon) => sum + addon.price, 0);
+      return total + ((item.price + addOnsTotal) * item.quantity);
+    }, 0);
   }, [cart]);
+
+  // Hitung otomatis biaya ongkir (jika delivery, tambah Rp 10.000)
+  const deliveryFee = orderType === "delivery" ? 10000 : 0;
+
+  // Total biaya baru yang sudah digabung ongkir (Aman dari eror)
+  const grandTotal = useMemo(() => {
+    return cartTotal + deliveryFee;
+  }, [cartTotal, deliveryFee]);
+
   // Fungsi memasukkan kopi ke keranjang
   const addToCart = (product) => {
     setCart((prevCart) => {
-      // Cek apakah kopi ini sudah dimasukkan sebelumnya
       const isExist = prevCart.find((item) => item.id === product.id);
-      
       if (isExist) {
-        // Jika sudah ada, cukup tambahkan jumlahnya (quantity + 1)
         return prevCart.map((item) =>
           item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      // Jika belum ada, masukkan sebagai item baru dengan quantity = 1
       return [...prevCart, { ...product, quantity: 1 }];
     });
   };
 
-  // Fungsi mengubah jumlah (tambah/kurang boks kuantitas di dalam keranjang)
-  const updateQuantity = (productId, amount) => {
+  // 🟢 SELIPKAN FUNGSI BARU INI, BRO:
+  const toggleAddOn = (productId, addonName, addonPrice) => {
+    setCart((prevCart) =>
+      prevCart.map((item) => {
+        if (item.id === productId) {
+          const currentAddons = item.selectedAddOns || [];
+          const exists = currentAddons.find((a) => a.name === addonName);
+          
+          const updatedAddons = exists
+            ? currentAddons.filter((a) => a.name !== addonName) // Hapus jika di-uncheck
+            : [...currentAddons, { name: addonName, price: addonPrice }]; // Tambah jika di-check
+            
+          return { ...item, selectedAddOns: updatedAddons };
+        }
+        return item;
+      })
+    );
+  };
+
+  // 🟢 TAMBAHKAN FUNGSI INI BIAR TOMBOL + DAN - BISA JALAN, BRO:
+  const updateQuantity = (id, amount) => {
     setCart((prevCart) =>
       prevCart
         .map((item) => {
-          if (item.id === productId) {
-            const newQty = item.quantity + amount;
-            // Jika jumlahnya jadi 0 atau minus, item otomatis dihapus dari keranjang
-            return newQty > 0 ? { ...item, quantity: newQty } : null;
+          if (item.id === id) {
+            const nextQuantity = item.quantity + amount;
+            // Kalau diklik minus sampe di bawah 1, otomatis hapus item dari keranjang
+            return nextQuantity > 0 ? { ...item, quantity: nextQuantity } : null;
           }
           return item;
         })
-        .filter(Boolean) // Membersihkan item yang bernilai null (dihapus)
+        .filter(Boolean) // Menyaring & membersihkan item yang dihapus (null)
     );
   };
   // Fungsi mengirim pesanan ke Midtrans dan membuka pop-up pembayaran
-  // Fungsi mengirim pesanan ke Midtrans dan membuka pop-up pembayaran
   const handleCheckout = async () => {
-    // 🟢 1. PROTEKSI: Cek apakah user sudah masuk akun atau belum
+    // 1. PROTEKSI LOGIN  
     if (!user) {
       alert("Eits! Lu wajib masuk ruko Kopthree dulu sebelum checkout pesanan, Bro.");
-      
-      setAuthMode("login");       // Set modal ke mode login
-      setIsAuthModalOpen(true);   // Buka pop-up login secara otomatis
-      setIsCartOpen(false);       // Tutup modal keranjang biar gak tumpang tindih
-      return;                     // Hentikan proses, gak boleh lanjut ke Midtrans
+      setAuthMode("login");
+      setIsAuthModalOpen(true);
+      setIsCartOpen(false);
+      return;
     }
 
-    // 2. Jika lolos (sudah login), jalankan kode bawaan lu di bawah ini
+    // 2. JALAN PROSES KASIR MIDTRANS
     try {
-      const userEmail = user.email; // Sekarang email dijamin aman, gak bakal null
+      const userEmail = user.email;
 
-      // Ambil token dari API Route dengan menyertakan opsi & notes
+      // Ambil token dari API Route dengan melampirkan parameter komplit
       const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cart, userEmail, orderType, orderNotes }),
+        body: JSON.stringify({ 
+          cart, 
+          userEmail, 
+          orderType, 
+          orderNotes,
+          // 🟢 SUNTIK DATA BARU INI KE BACKEND:
+          tableNumber: orderType === "dine-in" ? tableNumber : null,
+          pickupTime: orderType === "takeaway" ? pickupTime : null,
+          deliveryFee: deliveryFee,
+          cartTotal: grandTotal // Kita kirim nominal grandTotal yang sudah + ongkir
+        }),
       });
 
       const data = await response.json();
@@ -222,9 +295,11 @@ export default function Home() {
         window.snap.pay(data.token, {
           onSuccess: function (result) {
             alert("Pembayaran Sukses! Kopi pilihanmu segera diseduh oleh barista Kopthree!");
-            setCart([]); 
-            setOrderNotes(""); 
-            setIsCartOpen(false); 
+            setCart([]);
+            setOrderNotes("");
+            setTableNumber(""); // 🟢 Reset meja
+            setPickupTime("");  // 🟢 Reset jam ambil
+            setIsCartOpen(false);
           },
           onPending: function (result) {
             alert("Pesanan pending, Bro. Segera selesaikan pembayaranmu ya!");
@@ -244,7 +319,6 @@ export default function Home() {
       alert("Kasir Kopthree sedang sibuk, terjadi gangguan sistem.");
     }
   };
-
 
   // Memantau status login user secara real-time
   useEffect(() => {
@@ -269,12 +343,27 @@ export default function Home() {
     }
   }, []);
 
-  // Fungsi untuk Register (Daftar Akun Baru)
+  // Fungsi untuk Register (Daftar Akun Baru + Kirim Data ke Firestore)
   const handleRegister = async (e) => {
     e.preventDefault();
     setAuthError("");
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      // 1. Daftarkan akun utama ke sistem Firebase Authentication
+      const credential = await createUserWithEmailAndPassword(auth, email, password);
+      const newUser = credential.user;
+
+      // 2. SUNTIK PROFIL: Buat dokumen baru di koleksi "users" menggunakan UID user sebagai ID dokumennya
+      const { doc, setDoc } = await import("firebase/firestore");
+      await setDoc(doc(db, "users", newUser.uid), {
+        id: newUser.uid,
+        name: registerName || "Pendekar Kopi", // Mengambil data dari state registerName
+        email: email,                          // Mengambil data dari state email
+        phone: phone || "-",                  // Mengambil data dari state phone
+        joinedAt: new Date().toISOString(),    // Mencatat tanggal & waktu registrasi secara realtime
+        role: "CUSTOMER"                      // Otoritas akses default untuk pembeli ruko
+      });
+
+      alert("Pendaftaran Sukses! Selamat bergabung di ruko Kopthree, Bro.");
       setIsAuthModalOpen(false); // Tutup modal jika sukses
       resetAuthFields();
     } catch (error) {
@@ -284,7 +373,7 @@ export default function Home() {
     }
   };
 
-  // Fungsi untuk Login
+  // Fungsi untuk Login (Tetap sama dengan bawaan asli lu)
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthError("");
@@ -297,7 +386,7 @@ export default function Home() {
     }
   };
 
-  // Fungsi untuk Logout
+  // Fungsi untuk Logout (Tetap sama dengan bawaan asli lu)
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -307,9 +396,12 @@ export default function Home() {
     }
   };
 
+  // Fungsi Pembersih Kolom (Diperbarui agar ikut menghapus isi input Nama & HP)
   const resetAuthFields = () => {
     setEmail("");
     setPassword("");
+    setRegisterName(""); // 🟢 Membersihkan sisa ketikan nama lengkap
+    setPhone("");        // 🟢 Membersihkan sisa ketikan nomor WhatsApp
     setAuthError("");
   };
 
@@ -458,7 +550,16 @@ export default function Home() {
             
             {/* LOGIKA JIKA USER SUDAH LOGIN VS BELUM LOGIN */}
             {user ? (
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-5">
+                
+                {/* 🟢 TOMBOL BARU: Klik untuk melihat riwayat pesanan */}
+                <button
+                  onClick={() => setIsHistoryOpen(true)}
+                  className="text-xs font-bold tracking-wider text-neutral-400 hover:text-amber-500 transition-colors uppercase outline-none"
+                >
+                  Pesanan Saya ({orderHistory.length})
+                </button>
+
                 <span className="text-xs text-neutral-400 hidden sm:inline">
                   Halo, <span className="text-amber-500 font-bold">{user.email.split('@')[0]}</span>
                 </span>
@@ -1088,6 +1189,36 @@ export default function Home() {
             )}
 
             <form onSubmit={authMode === "login" ? handleLogin : handleRegister} className="space-y-4">
+              
+              {/* 🟢 TEPAT DI SINI: Masukkan input Nama & No HP khusus untuk mode register */}
+              {authMode === "register" && (
+                <>
+                  <div>
+                    <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-widest block mb-1">Nama Lengkap</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={registerName}
+                      onChange={(e) => setRegisterName(e.target.value)}
+                      className="w-full bg-neutral-950 border border-neutral-800 focus:border-amber-500 text-sm text-white px-4 py-3 rounded-sm outline-none transition-colors"
+                      placeholder="Ade Tricahyo"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-widest block mb-1">No. WhatsApp</label>
+                    <input 
+                      type="tel" 
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full bg-neutral-950 border border-neutral-800 focus:border-amber-500 text-sm text-white px-4 py-3 rounded-sm outline-none transition-colors"
+                      placeholder="0831xxxx"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* ⬇️ Input Email bawaan lu yang sudah ada sebelumnya */}
               <div>
                 <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-widest block mb-1">Email</label>
                 <input 
@@ -1159,19 +1290,43 @@ export default function Home() {
                 </div>
               ) : (
                 cart.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-3 bg-neutral-950 border border-neutral-800/60 rounded-sm">
-                    <div className="flex-1 pr-4">
-                      <h4 className="text-sm font-bold text-white uppercase tracking-wide">{item.name}</h4>
-                      <p className="text-xs text-amber-500 font-mono mt-0.5">
-                        Rp {(item.price).toLocaleString("id-ID")} x {item.quantity}
-                      </p>
+                  <div key={item.id} className="p-3 bg-neutral-950 border border-neutral-800/60 rounded-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 pr-4">
+                        <h4 className="text-sm font-bold text-white uppercase tracking-wide">{item.name}</h4>
+                        <p className="text-xs text-amber-500 font-mono mt-0.5">
+                          Rp {(item.price).toLocaleString("id-ID")} x {item.quantity}
+                        </p>
+                      </div>
+                      
+                      {/* Tombol + - */}
+                      <div className="flex items-center space-x-2.5 bg-neutral-900 border border-neutral-800 px-2 py-1 rounded-sm">
+                        <button onClick={() => updateQuantity(item.id, -1)} className="text-neutral-400 hover:text-white font-bold text-xs">-</button>
+                        <span className="text-xs font-mono font-bold text-white w-4 text-center">{item.quantity}</span>
+                        <button onClick={() => updateQuantity(item.id, 1)} className="text-neutral-400 hover:text-white font-bold text-xs">+</button>
+                      </div>
                     </div>
-                    
-                    {/* Tombol + - */}
-                    <div className="flex items-center space-x-2.5 bg-neutral-900 border border-neutral-800 px-2 py-1 rounded-sm">
-                      <button onClick={() => updateQuantity(item.id, -1)} className="text-neutral-400 hover:text-white font-bold text-xs">-</button>
-                      <span className="text-xs font-mono font-bold text-white w-4 text-center">{item.quantity}</span>
-                      <button onClick={() => updateQuantity(item.id, 1)} className="text-neutral-400 hover:text-white font-bold text-xs">+</button>
+
+                    {/* 🟢 SEKARANG MUNCUL: PILIHAN PREMIUM ADD-ONS CAFE */}
+                    <div className="border-t border-neutral-900 pt-2 grid grid-cols-2 gap-2 text-[10px] text-neutral-400">
+                      {[
+                        { name: "Extra Shot (+5k)", key: "Extra Shot", price: 5000 },
+                        { name: "Oat Milk (+10k)", key: "Oat Milk", price: 10000 },
+                        { name: "Ice Cream (+7k)", key: "Ice Cream", price: 7000 }
+                      ].map((addon) => {
+                        const isChecked = (item.selectedAddOns || []).some((a) => a.name === addon.key);
+                        return (
+                          <label key={addon.key} className="flex items-center space-x-1.5 cursor-pointer hover:text-white select-none">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleAddOn(item.id, addon.key, addon.price)}
+                              className="accent-amber-500 h-3 w-3"
+                            />
+                            <span>{addon.name}</span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
                 ))
@@ -1198,6 +1353,34 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* 🟢 INPUT DINAMIS: Muncul otomatis sesuai tombol metode yang diklik */}
+                {orderType === "dine-in" && (
+                  <div className="space-y-1 animate-fadeIn">
+                    <label className="block text-[10px] text-amber-500 uppercase tracking-widest font-bold">Nomor Meja Dine-In</label>
+                    <input
+                      type="text"
+                      required
+                      value={tableNumber}
+                      onChange={(e) => setTableNumber(e.target.value)}
+                      placeholder="Misal: Meja 04, Meja Pojok"
+                      className="w-full bg-neutral-950 border border-neutral-800 p-2.5 text-xs text-white rounded-sm focus:outline-none focus:border-amber-500 transition-colors"
+                    />
+                  </div>
+                )}
+
+                {orderType === "takeaway" && (
+                  <div className="space-y-1 animate-fadeIn">
+                    <label className="block text-[10px] text-amber-500 uppercase tracking-widest font-bold">Jam Rencana Pengambilan</label>
+                    <input
+                      type="time"
+                      required
+                      value={pickupTime}
+                      onChange={(e) => setPickupTime(e.target.value)}
+                      className="w-full bg-neutral-950 border border-neutral-800 p-2.5 text-xs text-white rounded-sm focus:outline-none focus:border-amber-500 font-mono transition-colors"
+                    />
+                  </div>
+                )}
+
                 {/* Input Catatan Tambahan */}
                 <div>
                   <label className="block text-[10px] text-neutral-400 uppercase tracking-widest font-bold mb-1.5">Catatan Tambahan (Notes)</label>
@@ -1205,7 +1388,7 @@ export default function Home() {
                     rows="2"
                     value={orderNotes}
                     onChange={(e) => setOrderNotes(e.target.value)}
-                    placeholder="Contoh: Less sugar, es pisah, atau alamat lengkap delivery..."
+                    placeholder="Contoh: Less sugar, giling kasar, atau detail patokan alamat..."
                     className="w-full bg-neutral-950 border border-neutral-800 p-2.5 text-xs text-white rounded-sm focus:outline-none focus:border-amber-500 resize-none placeholder:text-neutral-700 font-sans"
                   ></textarea>
                 </div>
@@ -1213,20 +1396,34 @@ export default function Home() {
               </div>
             )}
 
-            {/* Total & Checkout (SUDAH TERHUBUNG MIDTRANS) */}
+            {/* 🟢 RINCIAN NOTA & TOTAL AKHIR (SUDAH TERHUBUNG GRANDTOTAL + ONGKIR) */}
             {cart.length > 0 && (
-              <div className="pt-4 border-t border-neutral-800 space-y-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-neutral-400">Total Biaya:</span>
-                  <span className="text-base font-mono font-bold text-amber-500">
-                    Rp {cartTotal.toLocaleString("id-ID")}
+              <div className="pt-4 border-t border-neutral-800 space-y-3">
+                <div className="flex items-center justify-between text-xs text-neutral-400">
+                  <span>Subtotal Kopi:</span>
+                  <span className="font-mono">Rp {cartTotal.toLocaleString("id-ID")}</span>
+                </div>
+                
+                {/* Muncul baris baru kalau user milih Delivery */}
+                {orderType === "delivery" && (
+                  <div className="flex items-center justify-between text-xs text-neutral-400 animate-fadeIn">
+                    <span>Biaya Ongkir:</span>
+                    <span className="font-mono text-amber-500">+ Rp {deliveryFee.toLocaleString("id-ID")}</span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between text-sm pt-2 border-t border-neutral-900 font-bold">
+                  <span className="text-neutral-200">Total Tagihan:</span>
+                  <span className="text-base font-mono text-amber-500">
+                    Rp {grandTotal.toLocaleString("id-ID")}
                   </span>
                 </div>
+
                 <button 
-                  onClick={handleCheckout} // <--- Fungsi kasir otomatis Midtrans sekarang aktif di sini
+                  onClick={handleCheckout}
                   className="w-full bg-amber-500 hover:bg-amber-600 text-neutral-950 font-black text-xs tracking-widest py-4 rounded-sm uppercase transition-all duration-300 shadow-lg shadow-amber-500/10"
                 >
-                  Checkout Pesanan Resmi
+                  Checkout Pesanan Kamu
                 </button>
               </div>
             )}
@@ -1292,6 +1489,97 @@ export default function Home() {
               >
                 Masukkan Keranjang
               </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+      {/* --- 🟢 POP-UP MODAL RIWAYAT & STATUS PESANAN PELANGGAN --- */}
+      {isHistoryOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/80 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-lg max-w-lg w-full relative flex flex-col max-h-[85vh] shadow-2xl">
+            
+            {/* Tombol Tutup */}
+            <button 
+              onClick={() => setIsHistoryOpen(false)}
+              className="absolute top-4 right-4 text-neutral-500 hover:text-white text-sm"
+            >
+              ✕
+            </button>
+
+            <h3 className="text-lg font-black text-white tracking-wider uppercase mb-4 border-b border-neutral-800 pb-3">
+              📋 Riwayat Seduhan Lu
+            </h3>
+
+            {/* Kotak Scroll List Riwayat */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              {orderHistory.length === 0 ? (
+                <div className="text-center py-12 text-neutral-500 font-light text-xs space-y-1">
+                  <p>Lu belum pernah mesen kopi di ruko Kopthree, Bro.</p>
+                  <p className="text-amber-500/60 font-medium">Ditunggu orderan pertamamu!</p>
+                </div>
+              ) : (
+                orderHistory.map((order) => (
+                  <div key={order.id} className="p-4 bg-neutral-950 border border-neutral-800/80 rounded-sm space-y-3">
+                    
+                    {/* Baris Atas: ID & Waktu */}
+                    <div className="flex justify-between items-start text-[10px] text-neutral-400 font-mono">
+                      <div>
+                        <span className="block text-neutral-500">ORDER ID</span>
+                        <span className="text-white font-bold">{order.id}</span>
+                      </div>
+                      <div className="text-right">
+                        <span>{order.createdAt ? new Date(order.createdAt).toLocaleString("id-ID") : "-"}</span>
+                      </div>
+                    </div>
+
+                    {/* Baris Tengah: Daftar Item Produk */}
+                    <div className="border-y border-neutral-900/60 py-2 space-y-1">
+                      {order.cart?.map((item, idx) => (
+                        <div key={idx} className="flex justify-between text-xs font-medium">
+                          <span className="text-neutral-300 uppercase">• {item.name} <span className="text-neutral-500 font-mono text-[10px]">({item.quantity}x)</span></span>
+                          <span className="text-neutral-400 font-mono">Rp {(item.price * item.quantity).toLocaleString("id-ID")}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Info Tambahan Opsi Meja / Jam Takeaway / Ongkir */}
+                    <div className="flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-wider">
+                      <span className="bg-neutral-900 px-2 py-0.5 rounded-sm text-neutral-400 border border-neutral-800">{order.orderType}</span>
+                      {order.orderType === "dine-in" && <span className="text-amber-500">Meja: {order.tableNumber || "Bebas"}</span>}
+                      {order.orderType === "takeaway" && <span className="text-purple-400">Jam Ambil: {order.pickupTime || "Secepatnya"}</span>}
+                      {order.orderType === "delivery" && <span className="text-blue-400">Ongkir Terbayar</span>}
+                    </div>
+
+                    {/* Baris Bawah: Status Bayar & Status Antrean Seduh */}
+                    <div className="flex justify-between items-center pt-1">
+                      <div className="flex space-x-2 text-[9px] font-black tracking-widest uppercase">
+                        {/* Status Transaksi Midtrans */}
+                        <span className={`px-2 py-0.5 rounded-sm ${order.status_pembayaran === "SUCCESS" ? "bg-green-950/60 text-green-400 border border-green-900" : "bg-amber-950/60 text-amber-500 border border-amber-900"}`}>
+                          💵 {order.status_pembayaran || "PENDING"}
+                        </span>
+                        
+                        {/* Status Pengerjaan Barista (Realtime) */}
+                        <span className={`px-2 py-0.5 rounded-sm ${
+                          order.status_pesanan === "SELESAI" ? "bg-blue-950 text-blue-400 border border-blue-900" :
+                          order.status_pesanan === "DIPROSES" ? "bg-purple-950 text-purple-400 border border-purple-900 animate-pulse" :
+                          "bg-neutral-900 text-neutral-500 border border-neutral-800"
+                        }`}>
+                          {order.status_pesanan === "SELESAI" ? "🎉 SIAP DINIKMATI" :
+                           order.status_pesanan === "DIPROSES" ? "☕ SEDANG DISEDUH" :
+                           "⏳ MENUNGGU ANTREAN"}
+                        </span>
+                      </div>
+
+                      {/* Total Biaya Akhir */}
+                      <span className="text-sm font-mono font-black text-amber-500">
+                        Rp {(order.cartTotal || 0).toLocaleString("id-ID")}
+                      </span>
+                    </div>
+
+                  </div>
+                ))
+              )}
             </div>
 
           </div>
